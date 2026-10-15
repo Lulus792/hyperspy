@@ -261,13 +261,21 @@ def _shift1D(data, **kwargs):
         return data
 
     data = ma.masked_invalid(data)
-    # #This is the interpolant function
+    # Spline interpolation requires increasing coordinates.
+    if original_axis[0] > original_axis[-1]:
+        interpolation_axis = original_axis[::-1]
+        data = data[::-1]
+    else:
+        interpolation_axis = original_axis
     si = scipy.interpolate.make_interp_spline(
-        original_axis, data, k=1, check_finite=False
+        interpolation_axis, data, k=1, check_finite=False
     )
 
-    # Evaluate interpolated data at shifted positions
-    return si(original_axis - shift)
+    # Evaluate at the physical coordinates rather than the sample indices.
+    positions = original_axis - shift
+    shifted = si(positions, extrapolate=False)
+    outside = (positions < interpolation_axis[0]) | (positions > interpolation_axis[-1])
+    return np.where(outside, kwargs.get("fill_value", np.nan), shifted)
 
 
 class Signal1D(signals.BaseSignal, CommonSignal1D):
@@ -460,7 +468,14 @@ class Signal1D(signals.BaseSignal, CommonSignal1D):
         SignalDimensionError
             If the signal dimension is not 1.
         NotImplementedError
-            If the signal axis is a non-uniform axis.
+            If ``expand=True`` on a non-uniform axis.
+
+        Notes
+        -----
+        Non-uniform axes are shifted by interpolating at their actual axis
+        coordinates. Extending a non-uniform axis with ``expand=True`` is not
+        supported because its extrapolated sampling positions are ambiguous.
+        For binned data, interpolation does not preserve bin-integrated counts.
         """
         if not np.any(shift_array):
             # Nothing to do, the shift array if filled with zeros
@@ -469,22 +484,34 @@ class Signal1D(signals.BaseSignal, CommonSignal1D):
             show_progressbar = preferences.General.show_progressbar
         self._check_signal_dimension_equals_one()
         axis = self.axes_manager.signal_axes[0]
-
-        if not axis.is_uniform:
+        if not axis.is_uniform and expand:
             raise NotImplementedError(
-                "This operation is not implemented for non-uniform axes."
+                "`expand=True` is not supported for non-uniform axes. "
+                "Use `interpolate_on_axis('uniform', axis='sig')` first."
             )
 
-        # Figure out min/max shifts, and translate to shifts in index as well
+        # Find the overlap of all shifted spectra in physical axis units.
         minimum, maximum = np.nanmin(shift_array), np.nanmax(shift_array)
-        if minimum < 0:
-            ihigh = 1 + axis.value2index(axis.high_value + minimum, rounding=math.floor)
+        if axis.is_uniform:
+            if minimum < 0:
+                ihigh = 1 + axis.value2index(
+                    axis.high_value + minimum, rounding=math.floor
+                )
+            else:
+                ihigh = axis.high_index + 1
+            if maximum > 0:
+                ilow = axis.value2index(axis.offset + maximum, rounding=math.ceil)
+            else:
+                ilow = axis.low_index
         else:
-            ihigh = axis.high_index + 1
-        if maximum > 0:
-            ilow = axis.value2index(axis.offset + maximum, rounding=math.ceil)
-        else:
-            ilow = axis.low_index
+            ilow, ihigh = 0, axis.size
+            if crop:
+                lower = axis.low_value + max(maximum, 0)
+                upper = axis.high_value + min(minimum, 0)
+                valid = np.flatnonzero((axis.axis >= lower) & (axis.axis <= upper))
+                if valid.size == 0:
+                    raise ValueError("The shifts leave no overlapping axis values.")
+                ilow, ihigh = valid[0], valid[-1] + 1
         if expand:
             if self._lazy:
                 import dask.array as da
@@ -683,7 +710,14 @@ class Signal1D(signals.BaseSignal, CommonSignal1D):
         SignalDimensionError
             If the signal dimension is not 1.
         NotImplementedError
-            If the signal axis is a non-uniform axis.
+            If the signal axis is non-uniform.
+
+        Notes
+        -----
+        Cross-correlation estimates lag in equally spaced samples and cannot
+        directly determine physical shifts on a non-uniform axis. First call
+        :meth:`~hyperspy.signal.BaseSignal.interpolate_on_axis` with
+        ``new_axis="uniform"`` on the signal axis.
         """
         if show_progressbar is None:
             show_progressbar = preferences.General.show_progressbar
@@ -692,7 +726,8 @@ class Signal1D(signals.BaseSignal, CommonSignal1D):
         axis = self.axes_manager.signal_axes[0]
         if not axis.is_uniform:
             raise NotImplementedError(
-                "The function is not implemented for non-uniform signal axes."
+                "`estimate_shift1D` requires a uniform signal axis. "
+                "Use `interpolate_on_axis('uniform', axis='sig')` first."
             )
         self._check_navigation_mask(mask)
         # we compute for now
@@ -812,6 +847,14 @@ class Signal1D(signals.BaseSignal, CommonSignal1D):
         ------
         SignalDimensionError
             If the signal dimension is not 1.
+        NotImplementedError
+            If the signal axis is non-uniform.
+
+        Notes
+        -----
+        The shift estimation requires uniform sampling. For non-uniform
+        signal axes, use ``interpolate_on_axis('uniform', axis='sig')``
+        before calling this method.
 
         See Also
         --------

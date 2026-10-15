@@ -141,6 +141,43 @@ class TestShift1D:
         s.shift1D(shifts, crop=True)
         np.testing.assert_allclose(s.data[0, 0, :], np.arange(0.9, 9))
 
+    @pytest.mark.parametrize("crop", [True, False])
+    @pytest.mark.parametrize("descending", [True, False])
+    @pytest.mark.parametrize("functional", [True, False])
+    def test_non_uniform_axis(self, crop, descending, functional):
+        s = hs.signals.Signal1D(np.zeros((2, 5), dtype=float))
+        axis = s.axes_manager.signal_axes[0]
+        if functional:
+            if descending:
+                axis.offset = 4
+                axis.scale = -1
+            axis.convert_to_functional_data_axis(expression="x**2")
+        else:
+            axis.convert_to_non_uniform_axis()
+            x = np.array([0.0, 1.0, 3.0, 6.0, 10.0])
+            if descending:
+                x = x[::-1]
+            axis.axis = x.copy()
+        x = axis.axis.copy()
+        s.data[:] = x
+
+        s.shift1D(
+            np.array([0.0, 1.0]), crop=crop, fill_value=-1, show_progressbar=False
+        )
+
+        expected_axis = x[x >= 1] if crop else x
+        np.testing.assert_array_equal(axis.axis, expected_axis)
+        expected = np.stack(
+            (expected_axis, np.where(expected_axis < 1, -1, expected_axis - 1))
+        )
+        np.testing.assert_allclose(np.asarray(s.data), expected)
+
+    def test_non_uniform_expand_raises(self):
+        s = hs.signals.Signal1D(np.arange(5, dtype=float))
+        s.axes_manager.signal_axes[0].convert_to_non_uniform_axis()
+        with pytest.raises(NotImplementedError, match="expand=True"):
+            s.shift1D([1.0], expand=True)
+
 
 @lazifyTestClass
 class TestFindPeaks1D:

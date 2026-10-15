@@ -1,0 +1,1 @@
+Support ``Signal1D.shift1D`` for non-uniform signal axes, preserving their coordinates during interpolation (except for ``expand=True``).

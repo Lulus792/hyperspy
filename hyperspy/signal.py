@@ -3837,6 +3837,14 @@ class BaseSignal(FancySlicing, MVA, MVATools):
         NotImplementedError
             If trying to rebin over a non-uniform axis.
 
+        Notes
+        -----
+        Rebinning an existing uniform axis is supported even if other axes
+        are non-uniform. To rebin a non-uniform axis, first use
+        :meth:`~hyperspy.signal.BaseSignal.interpolate_on_axis` with
+        ``new_axis="uniform"`` for the axis to rebin. For binned data,
+        interpolation does not generally conserve bin-integrated counts.
+
         Examples
         --------
         >>> spectrum = hs.signals.Signal1D(np.ones([4, 4, 10]))

@@ -41,8 +41,6 @@ def test_signal1d():
     with pytest.raises(NotImplementedError):
         s.calibrate()
     with pytest.raises(NotImplementedError):
-        s.shift1D([1])
-    with pytest.raises(NotImplementedError):
         s.estimate_shift1D([1])
     with pytest.raises(NotImplementedError):
         s.smooth_savitzky_golay()
